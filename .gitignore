@@ -1,0 +1,13 @@
+build*/
+release/
+.vscode/
+html/
+pico_sdk_import.cmake
+pcb/eagle/*.b#*
+pcb/eagle/*.s#*
+pcb/eagle/gerber*
+pcb/eagle/haier/*.b#*
+pcb/eagle/haier/*.s#*
+pcb/eagle/haier/gerber*
+tools/odu_manipulator/*.o
+tools/*[!.]*
