@@ -18,8 +18,7 @@ add_executable(cli
 # Include directories for header files
 target_include_directories(cli PUBLIC "${PROJECT_SOURCE_DIR}/src")
 target_include_directories(${PROJECT_NAME} PRIVATE
-    "inc"
-    "../../"
+    "cli/src/"
 )
 
 target_link_libraries(${PROJECT_NAME} modbus)
