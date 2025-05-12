@@ -1,0 +1,4 @@
+[submodule "cli"]
+	path = cli
+	url = https://github.com/sp1mdo/cli.git
+	branch = main
