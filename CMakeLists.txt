@@ -53,7 +53,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     "cli/src/"
 )
 
-target_link_libraries(${PROJECT_NAME} modbus)
+target_link_libraries(${PROJECT_NAME} modbus pthread)
 target_compile_options(remote_cli PRIVATE
     -Wall
     -Werror

@@ -1,21 +1,21 @@
+#include <atomic>
 #include <cstdio>
-#include <string>
-#include <vector>
+#include <cstring>
+#include <fstream>
+#include <filesystem>
 #include <functional>
 #include <iostream>
-#include <algorithm>
+#include <map>
+#include <mutex>
 #include <limits>
-#include <fstream>
 #include <thread>
 #include <set>
-#include <cstring>
-#include <atomic>
-#include <map>
 #include <regex>
-#include <filesystem>
-#include <modbus/modbus.h>
+#include <string>
+#include <vector>
+
 #include <getopt.h>
-#include <mutex>
+#include <modbus/modbus.h>
 
 #include "modbus_registers.h"
 #include "struct.h"
@@ -30,14 +30,12 @@ void read_registers_from_file(const std::filesystem::path &file);
 int writeMultipleRegisters(uint16_t *registers, uint16_t addr, uint16_t count);
 int updateHoldingRegister(uint16_t from, uint16_t to);
 int updateHoldingRegister(uint16_t reg);
-
 int updateInputRegister(uint16_t from, uint16_t to);
 int updateInputRegister(uint16_t reg);
-
 int writeRegister(uint16_t reg, uint16_t value);
+
 std::atomic<bool> g_monitor_enable = false;
 Prompt my_prompt("AHU_2040");
-std::filesystem::path configFile;
 
 uint16_t *holdingRegisters{nullptr};
 uint16_t inputRegisters[e_input_last_item];
@@ -47,8 +45,9 @@ std::vector<uint16_t> monitor_registers;
 
 modbus_t *ctx;
 std::mutex monitor_mutex;
+std::mutex modbus_mutex;
 
-void set_monitor(const std::string &str) // TODO mutex
+void set_monitor(const std::string &str)
 {
     std::unique_lock lk(monitor_mutex);
     Tokens tokens = tokenize(str);
@@ -74,7 +73,7 @@ void set_monitor(const std::string &str) // TODO mutex
         free(tmpStr);
     }
 
-    //mutex_exit(&my_mutex);
+    // mutex_exit(&my_mutex);
     return;
 }
 
@@ -85,9 +84,9 @@ void print_monitor(void)
     {
         // Find min-max of monitored registers
         {
-        uint16_t min = *std::min_element(monitor_registers.begin(), monitor_registers.end());
-        uint16_t max = *std::max_element(monitor_registers.begin(), monitor_registers.end());
-        updateInputRegister(min, max);
+            uint16_t min = *std::min_element(monitor_registers.begin(), monitor_registers.end());
+            uint16_t max = *std::max_element(monitor_registers.begin(), monitor_registers.end());
+            updateInputRegister(min, max);
         }
 
         std::string product;
@@ -107,25 +106,24 @@ void print_monitor(void)
 void timer_thread(int ms)
 {
     using namespace std::chrono_literals;
-    while(1)
+    while (1)
     {
         std::this_thread::sleep_for(std::chrono::milliseconds(ms));
-        if(g_monitor_enable)
+        if (g_monitor_enable)
         {
             print_monitor();
         }
-        
     }
 }
 
 void special_function(int key)
 {
-    if(key == 3)
+    if (key == 3)
     {
         g_monitor_enable = !g_monitor_enable;
-        printf("Monitor is %s\n", g_monitor_enable ? "ENABLED" : "DISABLED" );
+        printf("Monitor is %s\n", g_monitor_enable ? "ENABLED" : "DISABLED");
     }
-    else 
+    else
     {
         std::cout << "Pressed F" << key + 1 << std::endl;
     }
@@ -141,57 +139,54 @@ void init_monitor(void)
     monitor_registers.reserve(7);
     // Default pattern of monitoring, can be changed by user
     monitor_names.emplace_back("COMP");
-#if defined(midea) || defined(gree)
+//#if defined(midea) || defined(gree)
     monitor_names.emplace_back("FAN");
-#endif
+    monitor_registers.emplace_back(e_fan);
+//#endif
     monitor_names.emplace_back("LEVEL");
     monitor_names.emplace_back("T3");
     monitor_names.emplace_back("T4");
     monitor_names.emplace_back("T5");
-#if defined(midea) || defined(haier)
-    monitor_names.emplace_back("EXV");
-#endif
-#ifdef gree
-    monitor_names.emplace_back("EXV_A");
-    monitor_names.emplace_back("EXV_B");
-#endif
-
-    monitor_registers.emplace_back(e_compressor);
-#if defined(midea) || defined(gree)
-    monitor_registers.emplace_back(e_fan);
-#endif
     monitor_registers.emplace_back(e_powerLevel_100);
     monitor_registers.emplace_back(e_condenser_temp);
     monitor_registers.emplace_back(e_ambient_temp);
     monitor_registers.emplace_back(e_discharge_temp);
 
-#ifdef midea
+//#if defined(midea) || defined(haier)
+    monitor_names.emplace_back("EXV");
     monitor_registers.emplace_back(eev_ro);
-#endif
-#ifdef gree
+//#endif
+//#ifdef gree
+    monitor_names.emplace_back("EXV_A");
+    monitor_names.emplace_back("EXV_B");
     monitor_registers.emplace_back(eev_ro);
     monitor_registers.emplace_back(eev1_ro);
-#endif
+//#endif
+    monitor_registers.emplace_back(e_compressor);
 }
 
 void new_terminal_init(void)
 {
     my_prompt.insertMenuItem(std::string("settings show"), [](std::string)
-                             {  updateHoldingRegister(0, e_holding_last_item); updateInputRegister(0,e_input_last_item); show_settings(); });
+                             {  updateHoldingRegister(0, e_holding_last_item);
+                                updateInputRegister(0,e_input_last_item);
+                                show_settings(); });
     my_prompt.insertMenuItem("settings save", [](std::string)
-                             { write_settings_to_file(configFile); });
-
-    my_prompt.insertMenuItem("settings read", [](std::string)
-                               { read_registers_from_file(configFile);
-                                writeMultipleRegisters(holdingRegisters, 0, e_holding_last_item);
-                                     });
+                             {  writeRegister(e_save_button, 1); });
+    my_prompt.insertMenuItem("settings write_config", [](std::string x)
+                             { 
+                                updateHoldingRegister(0, e_holding_last_item);
+                                write_settings_to_file(x); });
+    my_prompt.insertMenuItem("settings read_config", [](std::string x)
+                             { read_registers_from_file(x);
+                                writeMultipleRegisters(holdingRegisters, 0, e_holding_last_item); });
     my_prompt.insertMenuItem("settings restore_default", [](std::string)
-                                { restore_default_settings(); 
-                                    writeMultipleRegisters(holdingRegisters, 0, e_holding_last_item);});
-    // my_prompt.insertMenuItem("system bootsel", [](std::string)
-    //                            { bootsel_mode(); });
-    // my_prompt.insertMenuItem("system reset", [](std::string)
-    //                            { reset_board(); });
+                             { restore_default_settings(); 
+                                    writeMultipleRegisters(holdingRegisters, 0, e_holding_last_item); });
+    my_prompt.insertMenuItem("system bootsel", [](std::string)
+                                { writeRegister(e_save_button, 3); });
+    my_prompt.insertMenuItem("system reset", [](std::string)
+                                { writeRegister(e_save_button, 2); });
     my_prompt.insertMenuItem("system show info", [](std::string)
                              { system_info(); });
     // my_prompt.insertMenuItem("system faults show_all", [](std::string)
@@ -203,7 +198,7 @@ void new_terminal_init(void)
                              { test_flow_value(static_cast<uint16_t>(std::stoul(x))); });
 
     my_prompt.insertMenuItem("operation show", [](std::string)
-                                { printf("Set operation mode : %s\nActual operation mode: %s\n", operationToString(holdingRegisters[e_mode]), operationToString(inputRegisters[e_operation_mode_ro])); });
+                             { printf("Set operation mode : %s\nActual operation mode: %s\n", operationToString(holdingRegisters[e_mode]), operationToString(inputRegisters[e_operation_mode_ro])); });
     my_prompt.insertMenuItem("operation set idle", [](std::string x)
                              { writeRegister(e_mode,IDLE_MODE); holdingRegisters[e_mode] = IDLE_MODE; });
     my_prompt.insertMenuItem("operation set cool_manual", [](std::string x)
@@ -315,11 +310,11 @@ void new_terminal_init(void)
     my_prompt.insertMenuItem("misc input_function show", [](std::string x)
                              { show_input_functions(); });
     my_prompt.insertMenuItem("misc monitor set", [](std::string x)
-                                { set_monitor(x); });
+                             { set_monitor(x); });
     my_prompt.insertMenuItem("misc monitor show", [](std::string x)
-                                { show_monitor(); });
+                             { show_monitor(); });
     my_prompt.insertMenuItem("misc monitor restore_default", [](std::string x)
-                                { init_monitor(); });
+                             { init_monitor(); });
 
     my_prompt.insertMenuItem("hot_water show", [](std::string x)
                              { holdingRegisters[e_hot_water_level] = static_cast<uint16_t>(std::stoul(x)); writeRegister(e_hot_water_level, holdingRegisters[e_hot_water_level]); });
@@ -334,19 +329,6 @@ void new_terminal_init(void)
     my_prompt.insertMenuItem("hot_water mode const_temp", [](std::string x)
                              { holdingRegisters[e_hotwater_mode] = cwu_fixed_temp; writeRegister(e_hotwater_mode, holdingRegisters[e_hotwater_mode]); });
 
-#ifdef WIRELESS
-    my_prompt.insertMenuItem("wifi ssid set", [](std::string x)
-                             { wifi_set_ssid(x); });
-    my_prompt.insertMenuItem("wifi password set", [](std::string x)
-                             { wifi_set_password(x); });
-    my_prompt.insertMenuItem("wifi show status", [](std::string x)
-                             { show_networking_info(); });
-    // my_prompt.insertMenuItem("wifi scan", [](std::string x)
-    //                            { scan_wifi_networks(); });
-#endif
-
-#ifdef DEVELOPER
-
 #if defined(midea) || defined(gree) || defined(generic)
     my_prompt.insertMenuItem("developer odu compressor", [](std::string x)
                              { holdingRegisters[e_override_compressor] = static_cast<uint16_t>(std::stoul(x)); });
@@ -355,21 +337,11 @@ void new_terminal_init(void)
     my_prompt.insertMenuItem("developer odu fan", [](std::string x)
                              { holdingRegisters[e_odu_fan_override] = static_cast<uint16_t>(std::stoul(x)); });
 #endif
-    // my_prompt.insertMenuItem("expert odu eev", [](std::string x)
-    //                            { holdingRegisters[e_pid_sampling_time] = static_cast<uint16_t>(std::stoul(x)); });
-
-    my_prompt.insertMenuItem("developer byte_override", [](std::string x)
-                             { byte_override(x); });
-#endif
-
-    my_prompt.insertMenuItem("quit", [](std::string x)
-                             { exit(0); });
-
-    // my_prompt.updateAuxMenu("");
 }
 
 int updateInputRegister(uint16_t reg)
 {
+    std::unique_lock lk(modbus_mutex);
     // Connect to the Modbus server
     if (modbus_connect(ctx) == -1)
     {
@@ -385,7 +357,7 @@ int updateInputRegister(uint16_t reg)
         return -1;
     }
 
-    // Close the connection and free the context
+    // Close the connection
     modbus_close(ctx);
 
     return 0;
@@ -393,6 +365,7 @@ int updateInputRegister(uint16_t reg)
 
 int updateInputRegister(uint16_t from, uint16_t to)
 {
+    std::unique_lock lk(modbus_mutex);
     // Connect to the Modbus server
     if (modbus_connect(ctx) == -1)
     {
@@ -408,7 +381,7 @@ int updateInputRegister(uint16_t from, uint16_t to)
         return -1;
     }
 
-    // Close the connection and free the context
+    // Close the connection
     modbus_close(ctx);
 
     return 0;
@@ -416,6 +389,7 @@ int updateInputRegister(uint16_t from, uint16_t to)
 
 int updateHoldingRegister(uint16_t reg)
 {
+    std::unique_lock lk(modbus_mutex);
     // Connect to the Modbus server
     if (modbus_connect(ctx) == -1)
     {
@@ -431,7 +405,7 @@ int updateHoldingRegister(uint16_t reg)
         return -1;
     }
 
-    // Close the connection and free the context
+    // Close the connection
     modbus_close(ctx);
 
     return 0;
@@ -439,6 +413,7 @@ int updateHoldingRegister(uint16_t reg)
 
 int updateHoldingRegister(uint16_t from, uint16_t to)
 {
+    std::unique_lock lk(modbus_mutex);
     // Connect to the Modbus server
     if (modbus_connect(ctx) == -1)
     {
@@ -454,7 +429,7 @@ int updateHoldingRegister(uint16_t from, uint16_t to)
         return -1;
     }
 
-    // Close the connection and free the context
+    // Close the connection
     modbus_close(ctx);
 
     return 0;
@@ -462,6 +437,7 @@ int updateHoldingRegister(uint16_t from, uint16_t to)
 
 int writeRegister(uint16_t reg, uint16_t value)
 {
+    std::unique_lock lk(modbus_mutex);
     // Connect to the Modbus server
     if (modbus_connect(ctx) == -1)
     {
@@ -483,6 +459,7 @@ int writeRegister(uint16_t reg, uint16_t value)
 
 int writeMultipleRegisters(uint16_t *registers, uint16_t addr, uint16_t count)
 {
+    std::unique_lock lk(modbus_mutex);
     // Connect to the Modbus server
     if (modbus_connect(ctx) == -1)
     {
@@ -534,7 +511,7 @@ void write_settings_to_file(const std::filesystem::path &file)
             << '\n';
     }
 
-    std::cout << "Successfully written settings to config file: " << configFile << "\n";
+    std::cout << "Successfully written settings to config file: " << file << "\n";
 }
 
 void read_registers_from_file(const std::filesystem::path &file)
@@ -542,7 +519,8 @@ void read_registers_from_file(const std::filesystem::path &file)
     std::ifstream ifs(file);
     if (!ifs)
     {
-        throw std::ios_base::failure("Failed to open file: " + file.string());
+        fprintf(stderr,"Failed to open file: %s :(\n", file.string().c_str());
+        return;
     }
 
     std::string line;
@@ -564,14 +542,15 @@ void read_registers_from_file(const std::filesystem::path &file)
             holdingRegisters[index] = static_cast<uint16_t>(value);
         }
     }
+    printf("Successfully read config file :-)\n");
 }
 
 int main(int argc, char **argv)
 {
     uint16_t tcp_port{502};
-    const char *ip_address;
+    const char *ip_address{nullptr};
     int opt;
-    while ((opt = getopt(argc, argv, "i:p:f:")) != -1)
+    while ((opt = getopt(argc, argv, "i:p:")) != -1)
     {
         switch (opt)
         {
@@ -579,9 +558,7 @@ int main(int argc, char **argv)
             ip_address = optarg;
             break;
 
-        case 'f':
-            configFile = optarg;
-            break;
+
 
         case 'p':
         {
@@ -603,14 +580,22 @@ int main(int argc, char **argv)
         }
     }
 
+    if (!ip_address)
+    {
+        fprintf(stderr, "Usage: %s -i ip_address\n", argv[0]);
+        exit(EXIT_FAILURE);
+    }
+
+    // Start timer thread for some periodic events
     std::thread timerThread(timer_thread, 1000);
     timerThread.detach();
 
     printf("IP Address: %s port : %hu\n", ip_address, tcp_port);
-    printf("Given config file %s\n", configFile.c_str());
     ctx = modbus_new_tcp(ip_address, tcp_port);
     modbus_set_slave(ctx, 53);
     init_monitor();
+
+    // Because Libmodbus API has changed after 3.1.2 version
 #ifdef LIBMODBUS_PRE_312
     const timeval response_timeout = {2, 0};
     modbus_set_response_timeout(ctx, &response_timeout);
@@ -624,8 +609,11 @@ int main(int argc, char **argv)
 
     for (int i = static_cast<int>(FnKey::F1); i < static_cast<int>(FnKey::F12) + 1; i++)
     {
-        my_prompt.attachFnKeyCallback(static_cast<FnKey>(i), std::bind(special_function, i));
+        my_prompt.attachFnKeyCallback(static_cast<FnKey>(i), [i]() { special_function(i); });
     }
+
+    updateHoldingRegister(0, e_holding_last_item);
+    updateInputRegister(0, e_input_last_item);
 
     new_terminal_init();
     my_prompt.Run();

@@ -18,7 +18,7 @@
 #define COOL_MASK        3  // 8
 #define IDLE_MASK        4  // 16
 #define OIL_MASK         5  // 32
-#define OPERATION_MASK  6  // 64
+#define OPERATION_MASK   6  // 64
 #define COMP             7  // 128
 #define HOT_WATER_MASK   8  // 256
 #define BIVALENT         9  // 512
@@ -60,6 +60,5 @@ enum cwu_t
     cwu_fixed_temp,
     cwu_legacy,
 };
-
 
 #endif // _STRUCT_H
