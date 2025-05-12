@@ -485,7 +485,8 @@ void write_settings_to_file(const std::filesystem::path &file)
 
     if (!ofs)
     {
-        throw std::ios_base::failure("Failed to open file: " + file.string());
+        fprintf(stderr,"Failed to open file: %s :(\n", file.string().c_str());
+        return;
     }
 
     if (!holdingRegisters)
@@ -511,7 +512,7 @@ void write_settings_to_file(const std::filesystem::path &file)
             << '\n';
     }
 
-    std::cout << "Successfully written settings to config file: " << file << "\n";
+    printf("Successfully written settings to the config file \"%s\" :-)\n",file.string().c_str());
 }
 
 void read_registers_from_file(const std::filesystem::path &file)
@@ -542,7 +543,7 @@ void read_registers_from_file(const std::filesystem::path &file)
             holdingRegisters[index] = static_cast<uint16_t>(value);
         }
     }
-    printf("Successfully read config file :-)\n");
+    printf("Successfully read config file \"%s\" :-)\n",file.string().c_str());
 }
 
 int main(int argc, char **argv)
