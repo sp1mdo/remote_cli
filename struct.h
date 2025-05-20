@@ -61,4 +61,12 @@ enum cwu_t
     cwu_legacy,
 };
 
+enum command_t
+{
+    command_save = 1,
+    command_reset,
+    command_bootsel,
+    command_default_settings,
+};
+
 #endif // _STRUCT_H

@@ -6,6 +6,7 @@
 #include <functional>
 #include <iostream>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <limits>
 #include <thread>
@@ -55,22 +56,21 @@ void set_monitor(const std::string &str)
     monitor_registers.clear();
     for (auto &myToken : tokens)
     {
-        char *tmpStr = (char *)malloc(myToken.size());
+        std::unique_ptr<char[]> tmpStr = std::make_unique<char[]>(myToken.size());
         if (tmpStr == NULL)
         {
-            printf("malloc failed!\n");
+            printf("alloc failed!\n");
             return;
         }
         uint16_t val;
-        if (sscanf(myToken.c_str(), "%[^=]=%hu", tmpStr, &val) != 2)
+        if (sscanf(myToken.c_str(), "%[^=]=%hu", tmpStr.get(), &val) != 2)
         {
             printf("incorrect syntax\n");
             return;
         }
 
-        monitor_names.emplace_back(tmpStr);
+        monitor_names.emplace_back(tmpStr.get());
         monitor_registers.emplace_back(val);
-        free(tmpStr);
     }
 
     // mutex_exit(&my_mutex);
@@ -139,17 +139,21 @@ void init_monitor(void)
     monitor_registers.reserve(7);
     // Default pattern of monitoring, can be changed by user
     monitor_names.emplace_back("COMP");
+    monitor_registers.emplace_back(e_compressor);
 //#if defined(midea) || defined(gree)
     monitor_names.emplace_back("FAN");
     monitor_registers.emplace_back(e_fan);
 //#endif
     monitor_names.emplace_back("LEVEL");
-    monitor_names.emplace_back("T3");
-    monitor_names.emplace_back("T4");
-    monitor_names.emplace_back("T5");
     monitor_registers.emplace_back(e_powerLevel_100);
+
+    monitor_names.emplace_back("T3");
     monitor_registers.emplace_back(e_condenser_temp);
+
+    monitor_names.emplace_back("T4");
     monitor_registers.emplace_back(e_ambient_temp);
+
+    monitor_names.emplace_back("T5");
     monitor_registers.emplace_back(e_discharge_temp);
 
 //#if defined(midea) || defined(haier)
@@ -158,11 +162,12 @@ void init_monitor(void)
 //#endif
 //#ifdef gree
     monitor_names.emplace_back("EXV_A");
-    monitor_names.emplace_back("EXV_B");
     monitor_registers.emplace_back(eev_ro);
+
+    monitor_names.emplace_back("EXV_B");
     monitor_registers.emplace_back(eev1_ro);
 //#endif
-    monitor_registers.emplace_back(e_compressor);
+
 }
 
 void new_terminal_init(void)
@@ -558,8 +563,6 @@ int main(int argc, char **argv)
         case 'i':
             ip_address = optarg;
             break;
-
-
 
         case 'p':
         {

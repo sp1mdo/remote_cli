@@ -14,8 +14,13 @@
 #include "pico/unique_id.h"
 #endif
 
+#ifdef WIRELESS
+#include "networking.hpp"
+extern char wifi_ssid[SSID_LEN+1];
+extern char wifi_pass[WIFI_PASS_LEN+1];
+#endif
 using Tokens = std::vector<std::string>;
-uint32_t git_hash = 0;
+uint32_t git_hash{0};
 
 class LookupTableVector
 {
@@ -152,8 +157,6 @@ void show_input_registers(std::vector<std::string> &tokens)
     }
     
     std::set<uint16_t> registers = registers_to_show(tokens, e_input_last_item);
-
-
 
     if (tokens.size() == 0)
     {
