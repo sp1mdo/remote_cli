@@ -83,9 +83,9 @@ const char *inputRegToStr(uint8_t reg)
     case e_heat_power:
         return "Heating power [W]";
     case e_ac_voltage:
-        return "AC Voltage [V] (TODO)";
+        return "AC Voltage [V]";
     case e_ac_current:
-        return "AC Current [10x A] (TODO)";
+        return "AC Current [mA])";
     case e_dc_bus_voltage:
         return "e_dc_bus_voltage";
     case e_settings_saved:
@@ -196,6 +196,12 @@ const char *holdingRegToStr(uint8_t reg)
         return "HEAT input function";
     case e_cool_input_function:
         return "COOL input function";
+    case e_defrost_max_frequency:
+        return "Defrost max. compressor frequency";
+    case e_defrost_end_t3_target:
+        return "Defrost end T3 target";
+    case e_defrost_max_duration:
+        return "Defrost max duration [min]";
     case e_holding_last_item:
         return "e_holding_last_item";
     }

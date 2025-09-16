@@ -54,27 +54,36 @@ void set_monitor(const std::string &str)
     Tokens tokens = tokenize(str);
     monitor_names.clear();
     monitor_registers.clear();
-    for (auto &myToken : tokens)
+
+    for (const auto &myToken : tokens)
     {
-        std::unique_ptr<char[]> tmpStr = std::make_unique<char[]>(myToken.size());
-        if (tmpStr == NULL)
+        auto equal_pos = myToken.find('=');
+        if (equal_pos == std::string::npos || equal_pos == 0 || equal_pos == myToken.size() - 1)
         {
-            printf("alloc failed!\n");
-            return;
-        }
-        uint16_t val;
-        if (sscanf(myToken.c_str(), "%[^=]=%hu", tmpStr.get(), &val) != 2)
-        {
-            printf("incorrect syntax\n");
+            std::cerr << "incorrect syntax\n";
             return;
         }
 
-        monitor_names.emplace_back(tmpStr.get());
-        monitor_registers.emplace_back(val);
+        std::string name = myToken.substr(0, equal_pos);
+        std::string valStr = myToken.substr(equal_pos + 1);
+
+        try
+        {
+            uint16_t val = static_cast<uint16_t>(std::stoul(valStr));
+            if (val < e_input_last_item)
+            {
+                monitor_names.emplace_back(name);
+                monitor_registers.emplace_back(val);
+            }
+            else
+                std::cerr << val << " is too big (max = " << e_input_last_item << ").\n";
+        }
+        catch (const std::exception &e)
+        {
+            std::cerr << "conversion failed: " << e.what() << "\n";
+            return;
+        }
     }
-
-    // mutex_exit(&my_mutex);
-    return;
 }
 
 void print_monitor(void)
@@ -105,8 +114,7 @@ void print_monitor(void)
 
 void timer_thread(int ms)
 {
-    using namespace std::chrono_literals;
-    while (1)
+    while (true)
     {
         std::this_thread::sleep_for(std::chrono::milliseconds(ms));
         if (g_monitor_enable)
@@ -140,10 +148,10 @@ void init_monitor(void)
     // Default pattern of monitoring, can be changed by user
     monitor_names.emplace_back("COMP");
     monitor_registers.emplace_back(e_compressor);
-//#if defined(midea) || defined(gree)
+    // #if defined(midea) || defined(gree)
     monitor_names.emplace_back("FAN");
     monitor_registers.emplace_back(e_fan);
-//#endif
+    // #endif
     monitor_names.emplace_back("LEVEL");
     monitor_registers.emplace_back(e_powerLevel_100);
 
@@ -156,18 +164,17 @@ void init_monitor(void)
     monitor_names.emplace_back("T5");
     monitor_registers.emplace_back(e_discharge_temp);
 
-//#if defined(midea) || defined(haier)
+    // #if defined(midea) || defined(haier)
     monitor_names.emplace_back("EXV");
     monitor_registers.emplace_back(eev_ro);
-//#endif
-//#ifdef gree
+    // #endif
+    // #ifdef gree
     monitor_names.emplace_back("EXV_A");
     monitor_registers.emplace_back(eev_ro);
 
     monitor_names.emplace_back("EXV_B");
     monitor_registers.emplace_back(eev1_ro);
-//#endif
-
+    // #endif
 }
 
 void new_terminal_init(void)
@@ -177,7 +184,7 @@ void new_terminal_init(void)
                                 updateInputRegister(0,e_input_last_item);
                                 show_settings(); });
     my_prompt.insertMenuItem("settings save", [](std::string)
-                             {  writeRegister(e_save_button, 1); });
+                             { writeRegister(e_save_button, Command::Save); });
     my_prompt.insertMenuItem("settings write_config", [](std::string x)
                              { 
                                 updateHoldingRegister(0, e_holding_last_item);
@@ -189,9 +196,9 @@ void new_terminal_init(void)
                              { restore_default_settings(); 
                                     writeMultipleRegisters(holdingRegisters, 0, e_holding_last_item); });
     my_prompt.insertMenuItem("system bootsel", [](std::string)
-                                { writeRegister(e_save_button, 3); });
+                             { writeRegister(e_save_button, 3); });
     my_prompt.insertMenuItem("system reset", [](std::string)
-                                { writeRegister(e_save_button, 2); });
+                             { writeRegister(e_save_button, 2); });
     my_prompt.insertMenuItem("system show info", [](std::string)
                              { system_info(); });
     // my_prompt.insertMenuItem("system faults show_all", [](std::string)
@@ -205,7 +212,7 @@ void new_terminal_init(void)
     my_prompt.insertMenuItem("operation show", [](std::string)
                              { printf("Set operation mode : %s\nActual operation mode: %s\n", operationToString(holdingRegisters[e_mode]), operationToString(inputRegisters[e_operation_mode_ro])); });
     my_prompt.insertMenuItem("operation set idle", [](std::string x)
-                             { writeRegister(e_mode,IDLE_MODE); holdingRegisters[e_mode] = IDLE_MODE; });
+                             { writeRegister(e_mode, Operation::Idle); holdingRegisters[e_mode] = Operation::Idle; });
     my_prompt.insertMenuItem("operation set cool_manual", [](std::string x)
                              { writeRegister(e_mode,1); holdingRegisters[e_mode] = 1; });
     my_prompt.insertMenuItem("operation set heat_manual", [](std::string x)
@@ -216,10 +223,10 @@ void new_terminal_init(void)
                              { writeRegister(e_mode,4); holdingRegisters[e_mode] = 4; });
 
     my_prompt.insertMenuItem("modbus input_registers show", [](std::string x)
-                             {updateInputRegister(0,e_input_last_item);callback(0, x); });
+                             { callback(0, x); });
 
     my_prompt.insertMenuItem("modbus holding_registers show", [](std::string x)
-                             {updateHoldingRegister(0, e_holding_last_item); callback(1, x); });
+                             { callback(1, x); });
     my_prompt.insertMenuItem("modbus holding_registers set", [](std::string x)
                              {
 
@@ -241,11 +248,11 @@ void new_terminal_init(void)
     //                            { printf("Serial settings: %u 8N1\nSlave_Id: %u\n", MODBUS_BAUD, MODBUS_SLAVE_ID); });
 
     my_prompt.insertMenuItem("control set local_0-10V", [](std::string)
-                             { writeRegister(e_control_mode,e_ctrl_mode_local); holdingRegisters[e_control_mode] = e_ctrl_mode_local; });
+                             { writeRegister(e_control_mode,Control::Local); holdingRegisters[e_control_mode] = Control::Local; });
     my_prompt.insertMenuItem("control set remote_0-100", [](std::string)
-                             { writeRegister(e_control_mode,e_ctrl_mode_remote_100); holdingRegisters[e_control_mode] = e_ctrl_mode_remote_100; });
+                             { writeRegister(e_control_mode,Control::RemoteLevel); holdingRegisters[e_control_mode] = Control::RemoteLevel; });
     my_prompt.insertMenuItem("control set remote_temperature", [](std::string)
-                             { writeRegister(e_control_mode,e_ctrl_mode_remote_temp); holdingRegisters[e_control_mode] = e_ctrl_mode_remote_temp; });
+                             { writeRegister(e_control_mode,Control::RemoteTemperature); holdingRegisters[e_control_mode] = Control::RemoteTemperature; });
 
     my_prompt.insertMenuItem("level set", [](std::string x)
                              { holdingRegisters[e_level] = static_cast<uint16_t>(std::stoul(x)); writeRegister(e_level, holdingRegisters[e_level]); });
@@ -328,11 +335,11 @@ void new_terminal_init(void)
     my_prompt.insertMenuItem("hot_water temperature", [](std::string x)
                              { holdingRegisters[e_hotwater_target_temperature] = static_cast<uint16_t>(std::stoul(x)); writeRegister(e_hotwater_target_temperature, holdingRegisters[e_hotwater_target_temperature]); });
     my_prompt.insertMenuItem("hot_water mode legacy", [](std::string x)
-                             { holdingRegisters[e_hotwater_mode] = cwu_legacy; writeRegister(e_hotwater_mode, holdingRegisters[e_hotwater_mode]); });
+                             { holdingRegisters[e_hotwater_mode] = CWU::Legacy; writeRegister(e_hotwater_mode, holdingRegisters[e_hotwater_mode]); });
     my_prompt.insertMenuItem("hot_water mode const_level", [](std::string x)
-                             { holdingRegisters[e_hotwater_mode] = cwu_fixed_comp;writeRegister(e_hotwater_mode, holdingRegisters[e_hotwater_mode]); });
+                             { holdingRegisters[e_hotwater_mode] = CWU::FixedLevel;writeRegister(e_hotwater_mode, holdingRegisters[e_hotwater_mode]); });
     my_prompt.insertMenuItem("hot_water mode const_temp", [](std::string x)
-                             { holdingRegisters[e_hotwater_mode] = cwu_fixed_temp; writeRegister(e_hotwater_mode, holdingRegisters[e_hotwater_mode]); });
+                             { holdingRegisters[e_hotwater_mode] = CWU::FixedTemp; writeRegister(e_hotwater_mode, holdingRegisters[e_hotwater_mode]); });
 
 #if defined(midea) || defined(gree) || defined(generic)
     my_prompt.insertMenuItem("developer odu compressor", [](std::string x)
@@ -490,7 +497,7 @@ void write_settings_to_file(const std::filesystem::path &file)
 
     if (!ofs)
     {
-        fprintf(stderr,"Failed to open file: %s :(\n", file.string().c_str());
+        fprintf(stderr, "Failed to open file: %s :(\n", file.string().c_str());
         return;
     }
 
@@ -517,7 +524,7 @@ void write_settings_to_file(const std::filesystem::path &file)
             << '\n';
     }
 
-    printf("Successfully written settings to the config file \"%s\" :-)\n",file.string().c_str());
+    printf("Successfully written settings to the config file \"%s\" :-)\n", file.string().c_str());
 }
 
 void read_registers_from_file(const std::filesystem::path &file)
@@ -525,7 +532,7 @@ void read_registers_from_file(const std::filesystem::path &file)
     std::ifstream ifs(file);
     if (!ifs)
     {
-        fprintf(stderr,"Failed to open file: %s :(\n", file.string().c_str());
+        fprintf(stderr, "Failed to open file: %s :(\n", file.string().c_str());
         return;
     }
 
@@ -548,7 +555,7 @@ void read_registers_from_file(const std::filesystem::path &file)
             holdingRegisters[index] = static_cast<uint16_t>(value);
         }
     }
-    printf("Successfully read config file \"%s\" :-)\n",file.string().c_str());
+    printf("Successfully read config file \"%s\" :-)\n", file.string().c_str());
 }
 
 int main(int argc, char **argv)
@@ -613,13 +620,17 @@ int main(int argc, char **argv)
 
     for (int i = static_cast<int>(FnKey::F1); i < static_cast<int>(FnKey::F12) + 1; i++)
     {
-        my_prompt.attachFnKeyCallback(static_cast<FnKey>(i), [i]() { special_function(i); });
+        my_prompt.attachFnKeyCallback(static_cast<FnKey>(i), [i]()
+                                      { special_function(i); });
     }
 
     updateHoldingRegister(0, e_holding_last_item);
     updateInputRegister(0, e_input_last_item);
 
     new_terminal_init();
+
+    // my_prompt.printTree();
+
     my_prompt.Run();
 
     delete[] holdingRegisters;

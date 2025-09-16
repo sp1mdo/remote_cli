@@ -8,68 +8,41 @@
 #include <iomanip>
 
 #include "cli_commands.hpp"
+#include "lookup_table.hpp"
 #include "struct.h"
 #include "modbus_registers.h"
 #if defined PICO_ON_DEVICE
 #include "pico/unique_id.h"
+#include "stopwatch.hpp"
 #endif
 
+#include "nanomodbus.h"
+
+using namespace std::literals;
+
 #ifdef WIRELESS
-#include "networking.hpp"
-extern char wifi_ssid[SSID_LEN+1];
-extern char wifi_pass[WIFI_PASS_LEN+1];
+#include "wireless.hpp"
+extern char wifi_ssid[SSID_LEN + 1];
+extern char wifi_pass[WIFI_PASS_LEN + 1];
 #endif
 using Tokens = std::vector<std::string>;
 uint32_t git_hash{0};
 
-class LookupTableVector
-{
-private:
-    std::vector<std::pair<int32_t, int32_t>> table;
+#if !defined PICO_ON_DEVICE
+extern int updateHoldingRegister(uint16_t from, uint16_t to);
+extern int updateHoldingRegister(uint16_t reg);
+extern int updateInputRegister(uint16_t from, uint16_t to);
+extern int updateInputRegister(uint16_t reg);
+uint8_t g_operationMode;
+bool g_defrost_request;
+#else
+extern int8_t figlarz;
+extern stopwatch_t g_defrost_timer;
+extern bool g_defrost_request;
+extern size_t getHash(const std::string &unique_id_str, size_t depth);
+#endif
 
-public:
-    explicit LookupTableVector(std::vector<std::pair<int32_t, int32_t>> input)
-        : table(std::move(input))
-    {
-    }
-
-    int32_t get(int32_t key) const
-    {
-        // Clamp low
-        if (key <= table.front().first)
-        {
-            return table.front().second;
-        }
-
-        // Clamp high
-        if (key >= table.back().first)
-        {
-            return table.back().second;
-        }
-
-        // Exact match or interpolate
-        for (std::size_t i = 1; i < table.size(); ++i)
-        {
-            if (key < table[i].first)
-            {
-                return interpolate(
-                    key,
-                    table[i - 1].first, table[i - 1].second,
-                    table[i].first, table[i].second);
-            }
-        }
-
-        // Fallback (shouldn’t be hit due to clamping)
-        return table.back().second;
-    }
-
-private:
-    static int32_t interpolate(int32_t x, int32_t x0, int32_t y0, int32_t x1, int32_t y1)
-    {
-        float ratio = static_cast<float>(x - x0) / (x1 - x0);
-        return static_cast<int32_t>(y0 + ratio * (y1 - y0));
-    }
-};
+extern uint8_t g_operationMode;
 
 void holding_registers_show_all(void)
 {
@@ -126,13 +99,13 @@ std::set<uint16_t> registers_to_show(std::vector<std::string> &tokens, size_t ma
 
 // Show registers function
 void show_holding_registers(std::vector<std::string> &tokens)
-{   
+{
     if (!tokens.empty() && tokens[0] == "all")
     {
-        tokens[0] = "0-" + std::to_string(e_holding_last_item-1);
+        tokens[0] = "0-" + std::to_string(e_holding_last_item - 1);
     }
 
-    std::set<uint16_t> registers = registers_to_show(tokens, e_holding_last_item-1);
+    std::set<uint16_t> registers = registers_to_show(tokens, e_holding_last_item - 1);
 
     if (tokens.size() == 0)
     {
@@ -140,6 +113,12 @@ void show_holding_registers(std::vector<std::string> &tokens)
         return;
     }
     printf("Showing %2zu registers:\n", registers.size());
+
+#if !defined PICO_ON_DEVICE
+    if (!registers.empty())
+        updateHoldingRegister(*registers.begin(), *registers.rbegin());
+#endif
+
     for (auto &reg : registers)
     {
         if (reg < e_holding_last_item)
@@ -153,9 +132,9 @@ void show_input_registers(std::vector<std::string> &tokens)
 {
     if (!tokens.empty() && tokens[0] == "all")
     {
-        tokens[0] = "0-" + std::to_string(e_input_last_item-1);
+        tokens[0] = "0-" + std::to_string(e_input_last_item - 1);
     }
-    
+
     std::set<uint16_t> registers = registers_to_show(tokens, e_input_last_item);
 
     if (tokens.size() == 0)
@@ -164,6 +143,12 @@ void show_input_registers(std::vector<std::string> &tokens)
         return;
     }
     printf("Showing %2zu registers:\n", registers.size());
+
+#if !defined PICO_ON_DEVICE
+    if (!registers.empty())
+        updateInputRegister(*registers.begin(), *registers.rbegin());
+#endif
+
     for (auto &reg : registers)
     {
         if (reg < e_input_last_item)
@@ -227,7 +212,6 @@ void callback(int id, const std::string &str)
             printf("Too many parameters.\n");
             return;
         }
-        
 
         set_register(std::stoi(tokens[0]), std::stoi(tokens[1]));
         return;
@@ -237,20 +221,42 @@ void callback(int id, const std::string &str)
     }
 }
 
+void show_defrost(void)
+{
+    if (g_defrost_request)
+    {
+        printf("Defrost already pending.\n");
+        #if defined PICO_ON_DEVICE
+        printf("Time remaining to finish : %lu s\n", holdingRegisters[e_defrost_max_duration] * 60 - g_defrost_timer.getSec());
+#endif
+        printf("Temperature delta to finish : ");
+        if ((int16_t)inputRegisters[e_condenser_temp] >= 0)
+            printf("%2.1f-%2.1f=%2.1f ['C]\n", holdingRegisters[e_defrost_end_t3_target] / 10.0, (int16_t)inputRegisters[e_condenser_temp] / 10.0, (holdingRegisters[e_defrost_end_t3_target] - (int16_t)inputRegisters[e_condenser_temp]) / 10.0);
+        else
+            printf("%2.1f+%2.1f=%2.1f ['C]\n", holdingRegisters[e_defrost_end_t3_target] / 10.0, -(int16_t)inputRegisters[e_condenser_temp] / 10.0, (holdingRegisters[e_defrost_end_t3_target] - (int16_t)inputRegisters[e_condenser_temp]) / 10.0);
+    }
+    else if (g_operationMode == Operation::Heating)
+    {
+        printf("%u s till defrost", inputRegisters[e_till_defrost]);
+    }
+    else
+        printf("No pending defrost, and it's not going to happen.\n");
+}
+
 void show_settings()
 {
     char tempStr[21];
     switch (holdingRegisters[e_control_mode])
     {
-    case e_ctrl_mode_local:
+    case Control::Local:
         strncpy(tempStr, "Local 0-10V", sizeof(tempStr) - 1);
         break;
 
-    case e_ctrl_mode_remote_100:
+    case Control::RemoteLevel:
         strncpy(tempStr, "Remote 0-100%", sizeof(tempStr) - 1);
         break;
 
-    case e_ctrl_mode_remote_temp:
+    case Control::RemoteTemperature:
         strncpy(tempStr, "Remote temp.", sizeof(tempStr) - 1);
         break;
 
@@ -295,10 +301,15 @@ void show_relay_functions()
     printf("DEFROST relay function                     %s\n", getRelayModeStr(holdingRegisters[e_defrost_relay_function]).c_str());
 }
 
+void show_control(void)
+{
+    printf("Control set to %s\n", controlToSv(holdingRegisters[e_control_mode]).data());
+}
+
 void show_hot_water(void)
 {
-    const char* prefix = "Hot water";
-    printf("%s Mode                               %s\n", prefix, getHotWaterModeStr(inputRegisters[e_hotwater_mode]).c_str());
+    const char *prefix = "Hot water";
+    printf("%s Mode                               %s\n", prefix, getHotWaterModeStr(inputRegisters[e_hotwater_mode]));
     printf("%s Target temeprature             %4.1f ['C]\n", prefix, holdingRegisters[e_hotwater_target_temperature] / 10.0);
     printf("%s Target level                   %4u [%%]\n", prefix, holdingRegisters[e_hot_water_level]);
 }
@@ -353,42 +364,63 @@ int8_t getInputRegScaleFactor(uint16_t reg)
     return 0;
 }
 
-void system_info(void)
+#if defined PICO_ON_DEVICE
+std::string get_unique_id_string()
 {
-    #if defined PICO_ON_DEVICE
-    char usbd_serial_str[PICO_UNIQUE_BOARD_ID_SIZE_BYTES * 2 + 1]={0};
+    char usbd_serial_str[PICO_UNIQUE_BOARD_ID_SIZE_BYTES * 2 + 1] = {0};
     pico_get_unique_board_id_string(usbd_serial_str, sizeof(usbd_serial_str));
 
-    printf("Unique ID %s\n", usbd_serial_str);
+    return std::string(usbd_serial_str);
+}
+#endif
+
+void system_info(void)
+{
+#if defined PICO_ON_DEVICE
+    char usbd_serial_str[PICO_UNIQUE_BOARD_ID_SIZE_BYTES * 2 + 1] = {0};
+    pico_get_unique_board_id_string(usbd_serial_str, sizeof(usbd_serial_str));
+
+    printf("Unique ID %s\n", get_unique_id_string().c_str());
     printf("Build: %s %s\nGit hash: %08lx \n", __DATE__, __TIME__, git_hash);
-    #endif
     printf("Compressor operation range %u-%u [Hz]\n", inputRegisters[e_compressor_min_frequency], inputRegisters[e_compressor_max_frequency]);
+
+    if (getHash(get_unique_id_string(), 10) == UNIQUE_ID) // TODO generate by cmake
+    {
+        printf("License: OK\n");
+        figlarz = 0;
+    }
+    else
+    {
+        printf("License invalid :(\n");
+        figlarz = 1;
+    }
+    #endif
 }
 
 void show_input_functions()
 {
-    const char* suffix = " input function                        ";
-    printf("HEAT%s%s\n",suffix, getRelayModeStr(holdingRegisters[e_heat_input_function]).c_str());
-    printf("COOL%s%s\n",suffix, getRelayModeStr(holdingRegisters[e_cool_input_function]).c_str());
+    const char *suffix = " input function                        ";
+    printf("HEAT%s%s\n", suffix, getRelayModeStr(holdingRegisters[e_heat_input_function]).c_str());
+    printf("COOL%s%s\n", suffix, getRelayModeStr(holdingRegisters[e_cool_input_function]).c_str());
 }
 
 void show_pid(void)
 {
-    const char* prefix = "PID ";
-    printf("%sK_p                                  %4.1f\n",prefix, (holdingRegisters[e_Kp_factor] / 10.0));
-    printf("%sK_i                                  %4.2f\n",prefix, (holdingRegisters[e_Ki_factor] / 100.0));
-    printf("%sK_d                                  %4.1f\n",prefix, (holdingRegisters[e_Kd_factor] / 10.0));
-    printf("%s sampling time                       %4u [s]\n",prefix, (holdingRegisters[e_pid_sampling_time]));
-    printf("%shysteresis                           %4.1f ['K]\n",prefix, (holdingRegisters[e_pid_hysteresis] / 10.0));
+    const char *prefix = "PID ";
+    printf("%sK_p                                  %4.1f\n", prefix, (holdingRegisters[e_Kp_factor] / 10.0));
+    printf("%sK_i                                  %4.2f\n", prefix, (holdingRegisters[e_Ki_factor] / 100.0));
+    printf("%sK_d                                  %4.1f\n", prefix, (holdingRegisters[e_Kd_factor] / 10.0));
+    printf("%s sampling time                       %4u [s]\n", prefix, (holdingRegisters[e_pid_sampling_time]));
+    printf("%shysteresis                           %4.1f ['K]\n", prefix, (holdingRegisters[e_pid_hysteresis] / 10.0));
     // TODO print PID components
 }
 
 void show_oil(void)
 {
-    const char* prefix = "Oil recovery ";
-    printf("%slower comp limit            %4u [Hz]\n",prefix, (holdingRegisters[e_oil_recovery_low_freq]));
-    printf("%stime below limit            %4u [min]\n",prefix, (holdingRegisters[e_oil_recovery_low_time]));
-    printf("%sLVL restore.                %4u [Hz]\n",prefix, (holdingRegisters[e_oil_recovery_restore_freq]));
+    const char *prefix = "Oil recovery ";
+    printf("%slower comp limit            %4u [Hz]\n", prefix, (holdingRegisters[e_oil_recovery_low_freq]));
+    printf("%stime below limit            %4u [min]\n", prefix, (holdingRegisters[e_oil_recovery_low_time]));
+    printf("%sLVL restore.                %4u [Hz]\n", prefix, (holdingRegisters[e_oil_recovery_restore_freq]));
     printf("Next oil flushing in                     %4u [s]\n", inputRegisters[e_time_to_oil_recovery]);
     // TODO print time remaining
 }
@@ -413,18 +445,24 @@ const char *operationToString(uint16_t num)
 
 uint16_t hz_to_ltr_hr(uint16_t freq)
 {
-    LookupTableVector ht_to_ltr_table({ // Think how this could be optimized
+    LookupTable ltr_table({
+        // Think how this could be optimized
         {0, 0},
         {holdingRegisters[e_flow_x1], holdingRegisters[e_flow_y1]},
         {holdingRegisters[e_flow_x2], holdingRegisters[e_flow_y2]},
         {holdingRegisters[e_flow_x3], holdingRegisters[e_flow_y3]},
     });
 
-    return ht_to_ltr_table.get(freq);
+    return ltr_table.get(freq);
 }
 
-void test_flow_value(uint16_t val)
+void test_flow_value(int16_t val)
 {
+    if (val < 0)
+    {
+        printf("Flow cannot be negative.\n");
+        return;
+    }
     printf("Flow from %u Hz is equivalent to %u [ltr/hour].\n", val, hz_to_ltr_hr(val));
 }
 
@@ -458,19 +496,19 @@ void restore_default_settings(void)
     holdingRegisters[e_low_delta] = 20;
     holdingRegisters[e_high_delta] = 20;
 
-    // Regulator PID
-    #ifdef haier
+// Regulator PID
+#ifdef haier
     holdingRegisters[e_Kp_factor] = 100; // x10
     holdingRegisters[e_Ki_factor] = 10;  // x100
     holdingRegisters[e_Kd_factor] = 0;
-    #else
+#else
     holdingRegisters[e_Kp_factor] = 10; // x10
-    holdingRegisters[e_Ki_factor] = 10;  // x100
+    holdingRegisters[e_Ki_factor] = 10; // x100
     holdingRegisters[e_Kd_factor] = 0;
-    #endif
+#endif
 
-    holdingRegisters[e_pid_sampling_time] = 1;    // 1s
-    holdingRegisters[e_pid_hysteresis] = 1;       // 0.1 K
+    holdingRegisters[e_pid_sampling_time] = 1; // 1s
+    holdingRegisters[e_pid_hysteresis] = 1;    // 0.1 K
 
     // Zabezpieczenia
     holdingRegisters[e_minimal_flow] = 15;
@@ -501,9 +539,21 @@ void restore_default_settings(void)
 
     holdingRegisters[e_hot_water_level] = 90;              // Domylsny poziom mocy do grzania CWU
     holdingRegisters[e_hotwater_target_temperature] = 460; // domyslny target temp dla CWU
-    holdingRegisters[e_hotwater_mode] = cwu_fixed_comp;    // domyslny tryb dla CWU
+    holdingRegisters[e_hotwater_mode] = CWU::FixedLevel;    // domyslny tryb dla CWU
 
     holdingRegisters[e_ambient_temp_scope] = 60; // liczba minut wstecz z ktorej brana srednia Tzew dla pogodowki
+
+    holdingRegisters[e_defrost_max_frequency] = 45;
+    holdingRegisters[e_defrost_end_t3_target] = 300; // 30'C
+    holdingRegisters[e_defrost_max_duration] = 10;   // 5 min
+#ifdef ENCODER
+    MODBUS_SLAVE_ID = 53;
+    MODBUS_BAUD = 9600;
+    //g_modbus_baud = 11 ?
+    inputRegisters[e_compressor_min_frequency] = 28 ;
+    inputRegisters[e_compressor_max_frequency] = 75 ;
+ #endif
+
 
 #ifdef WIRELESS
     memset(wifi_ssid, 0, sizeof(wifi_ssid));
@@ -512,21 +562,36 @@ void restore_default_settings(void)
     printf("Restored default settings.\n");
 }
 
-
-std::string getHotWaterModeStr(uint16_t mode)
+const char *getHotWaterModeStr(uint16_t mode)
 {
-    switch(mode)
+    switch (mode)
     {
-        case cwu_fixed_comp:
+    case CWU::FixedLevel:
         return "Level";
 
-        case cwu_fixed_temp:
+    case CWU::FixedTemp:
         return "Temperature";
 
-        case cwu_legacy:
+    case CWU::Legacy:
         return "Legacy";
     }
     return "Unknown?";
+}
+
+std::string_view controlToSv(uint16_t val)
+{
+    switch (val)
+    {
+    case Control::Local:
+        return "Local 0-10V"sv;
+    case Control::RemoteLevel:
+        return "Remote 0-100"sv;
+    case Control::RemoteTemperature:
+        return "Remote temperature"sv;
+
+    default:
+        return "Unknown?"sv;
+    }
 }
 
 std::string getRelayModeStr(uint16_t mask)
@@ -575,8 +640,8 @@ std::string getRelayModeStr(uint16_t mask)
                 append_string = "COMPRESSOR";
                 break;
 
-            case BOOT:
-                append_string = "BOOT";
+            case WAKEUP:
+                append_string = "WAKE";
                 break;
 
             case HOT_WATER_MASK:
