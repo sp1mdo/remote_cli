@@ -562,13 +562,21 @@ int main(int argc, char **argv)
 {
     uint16_t tcp_port{502};
     const char *ip_address{nullptr};
+    const char *char_dev{nullptr};
     int opt;
-    while ((opt = getopt(argc, argv, "i:p:")) != -1)
+    bool given_ip{false};
+    bool given_chardev{false};
+    while ((opt = getopt(argc, argv, "i:p:d:")) != -1)
     {
         switch (opt)
         {
         case 'i':
             ip_address = optarg;
+            given_ip = true;
+            break;
+        case 'd':
+            char_dev = optarg;
+            given_chardev = true;
             break;
 
         case 'p':
@@ -587,22 +595,43 @@ int main(int argc, char **argv)
 
         default:
             fprintf(stderr, "Usage: %s -i ip_address\n", argv[0]);
+            fprintf(stderr, "Usage: %s -d /dev/ttyUSB<N>\n", argv[0]);
             exit(EXIT_FAILURE);
         }
     }
 
-    if (!ip_address)
+    if(given_ip && given_chardev)
+    {
+        fprintf(stderr, "Pick only one of variants, RTU (-d), or TCP (-i)\n");
+        exit(EXIT_FAILURE);
+    }
+
+    if (!ip_address && !char_dev)
     {
         fprintf(stderr, "Usage: %s -i ip_address\n", argv[0]);
+        fprintf(stderr, "Usage: %s -d /dev/ttyUSB<N>\n", argv[0]);
         exit(EXIT_FAILURE);
     }
 
     // Start timer thread for some periodic events
-    std::thread timerThread(timer_thread, 1000);
+    std::thread timerThread(timer_thread, 100);
     timerThread.detach();
 
-    printf("IP Address: %s port : %hu\n", ip_address, tcp_port);
-    ctx = modbus_new_tcp(ip_address, tcp_port);
+    if (given_ip)
+    {
+        printf("IP Address: %s port : %hu\n", ip_address, tcp_port);
+        ctx = modbus_new_tcp(ip_address, tcp_port);
+    }
+    else if(given_chardev)
+    {
+        printf("Serial device : %s\n", char_dev);
+        ctx = modbus_new_rtu(char_dev, 9600, 'N', 8, 1);
+    }
+    else
+    {
+        throw std::runtime_error("No modbus variant specified");
+    }
+    
     modbus_set_slave(ctx, 53);
     init_monitor();
 
