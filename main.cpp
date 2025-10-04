@@ -479,7 +479,7 @@ int writeMultipleRegisters(uint16_t *registers, uint16_t addr, uint16_t count)
         return -1;
     }
 
-    int rc = modbus_write_registers(ctx, addr, count, registers);
+    int rc = modbus_write_registers(ctx, addr, count-1, registers);
     if (rc == -1)
     {
         fprintf(stderr, "Write failed: %s\n", modbus_strerror(errno));
