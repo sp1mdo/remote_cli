@@ -614,7 +614,7 @@ int main(int argc, char **argv)
     }
 
     // Start timer thread for some periodic events
-    std::thread timerThread(timer_thread, 100);
+    std::thread timerThread(timer_thread, 1000);
     timerThread.detach();
 
     if (given_ip)
@@ -630,6 +630,11 @@ int main(int argc, char **argv)
     else
     {
         throw std::runtime_error("No modbus variant specified");
+    }
+    if(!ctx)
+    {
+        fprintf(stderr, "unable to connetc\n");
+        std::abort();
     }
     
     modbus_set_slave(ctx, 53);
@@ -653,13 +658,13 @@ int main(int argc, char **argv)
                                       { special_function(i); });
     }
 
-    updateHoldingRegister(0, e_holding_last_item);
-    updateInputRegister(0, e_input_last_item);
-
+    if(updateHoldingRegister(0, e_holding_last_item) == -1 || updateInputRegister(0, e_input_last_item) == -1)
+    {
+        fprintf(stderr, "unable to connetc\n");
+        std::abort();
+    }
+    
     new_terminal_init();
-
-    // my_prompt.printTree();
-
     my_prompt.Run();
 
     delete[] holdingRegisters;
