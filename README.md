@@ -46,13 +46,28 @@ cmake ..
 make 
 ```
 
-### Running the CLI
-## How to run it using Modbus RTU
+## Running the application
+### How to run it using Modbus RTU
 ```sh
   ./remote_cli -d /dev/ttyUSB<N> 
 ```
 
-## How to run it using Modbus TCP
+### How to run it using Modbus TCP
 ```sh
   ./remote_cli -i <IP_ADDR>
+```
+
+
+### How to save the device's configuration into local file
+```sh
+[AHU_2040] > settings write_config my_configuration.cfg
+Successfully written settings to the config file "my_configuration.cfg" :-)
+[AHU_2040] >  
+```
+### How to save the device's configuration into local file
+```sh
+[AHU_2040] > settings read_config my_configuration.cfg
+Successfully read config file "my_configuration.cfg" :-)
+[AHU_2040] > settings save
+[AHU_2040] >  
 ```
