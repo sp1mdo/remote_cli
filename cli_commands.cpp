@@ -112,7 +112,7 @@ void show_holding_registers(std::vector<std::string> &tokens)
         printf("Example usage : %s 1 2 5-10 15 16\n", __func__);
         return;
     }
-    printf("Showing %2zu registers:\n", registers.size());
+    printf("Showing %zu registers:\n", registers.size());
 
 #if !defined PICO_ON_DEVICE
     if (!registers.empty())

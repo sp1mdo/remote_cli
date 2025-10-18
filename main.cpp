@@ -385,7 +385,7 @@ int updateInputRegister(uint16_t from, uint16_t to)
         return -1;
     }
 
-    int rc = modbus_read_input_registers(ctx, from, to - from, &inputRegisters[from]);
+    int rc = modbus_read_input_registers(ctx, from, to - from + 1, &inputRegisters[from]);
     if (rc == -1)
     {
         fprintf(stderr, "Read failed: %s\n", modbus_strerror(errno));
@@ -433,7 +433,7 @@ int updateHoldingRegister(uint16_t from, uint16_t to)
         return -1;
     }
 
-    int rc = modbus_read_registers(ctx, from, to - from, &holdingRegisters[from]);
+    int rc = modbus_read_registers(ctx, from, to - from + 1, &holdingRegisters[from]);
     if (rc == -1)
     {
         fprintf(stderr, "Read failed: %s\n", modbus_strerror(errno));
@@ -479,7 +479,7 @@ int writeMultipleRegisters(uint16_t *registers, uint16_t addr, uint16_t count)
         return -1;
     }
 
-    int rc = modbus_write_registers(ctx, addr, count-1, registers);
+    int rc = modbus_write_registers(ctx, addr, count - 1, registers);
     if (rc == -1)
     {
         fprintf(stderr, "Write failed: %s\n", modbus_strerror(errno));
@@ -600,7 +600,7 @@ int main(int argc, char **argv)
         }
     }
 
-    if(given_ip && given_chardev)
+    if (given_ip && given_chardev)
     {
         fprintf(stderr, "Pick only one of variants, RTU (-d), or TCP (-i)\n");
         exit(EXIT_FAILURE);
@@ -622,7 +622,7 @@ int main(int argc, char **argv)
         printf("IP Address: %s port : %hu\n", ip_address, tcp_port);
         ctx = modbus_new_tcp(ip_address, tcp_port);
     }
-    else if(given_chardev)
+    else if (given_chardev)
     {
         printf("Serial device : %s\n", char_dev);
         ctx = modbus_new_rtu(char_dev, 9600, 'N', 8, 1);
@@ -631,13 +631,17 @@ int main(int argc, char **argv)
     {
         throw std::runtime_error("No modbus variant specified");
     }
-    if(!ctx)
+    if (!ctx)
     {
         fprintf(stderr, "unable to connetc\n");
         std::abort();
     }
-    
+
     modbus_set_slave(ctx, 53);
+
+    // Enable debugging mode to print raw data
+    //modbus_set_debug(ctx, TRUE);
+
     init_monitor();
 
     // Because Libmodbus API has changed after 3.1.2 version
@@ -658,12 +662,11 @@ int main(int argc, char **argv)
                                       { special_function(i); });
     }
 
-    if(updateHoldingRegister(0, e_holding_last_item) == -1 || updateInputRegister(0, e_input_last_item) == -1)
+    if (updateHoldingRegister(0, e_holding_last_item) == -1 || updateInputRegister(0, e_input_last_item) == -1)
     {
         fprintf(stderr, "unable to connetc\n");
         std::abort();
     }
-    
     new_terminal_init();
     my_prompt.Run();
 
