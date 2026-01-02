@@ -44,9 +44,69 @@ uint16_t inputRegisters[e_input_last_item];
 std::vector<std::string> monitor_names;
 std::vector<uint16_t> monitor_registers;
 
+std::map<std::string, uint16_t> monitored;
+
 modbus_t *ctx;
 std::mutex monitor_mutex;
 std::mutex modbus_mutex;
+
+bool isInt(const std::string &s)
+{
+    try
+    {
+        size_t pos;
+        std::stoi(s, &pos);
+        return pos == s.size();
+    }
+    catch (...)
+    {
+        return false;
+    }
+}
+
+void monitor_add(const std::string &str)
+{
+    std::unique_lock lk(monitor_mutex);
+    Tokens tokens = tokenize(str);
+    if (tokens.size() != 2)
+    {
+        printf("Wrong syntax\n");
+        return;
+    }
+    if (isInt(tokens[1]))
+    {
+        monitored.emplace(tokens[0], std::stoi(tokens[1]));
+        printf("Added %s = %u\n", tokens[0].c_str(), monitored[tokens[0]]);
+    }
+    else
+    {
+        printf("second parameter must be positive integer\n");
+    }
+}
+
+void monitor_remove(const std::string &str)
+{
+    std::unique_lock lk(monitor_mutex);
+    auto it = monitored.find(str);
+    if (it != monitored.end())
+    {
+        printf("Removing (%s)\n", str.c_str());
+        monitored.erase(it);
+    }
+    else
+    {
+        printf("No such register in monitor map (%s)\n", str.c_str());
+    }
+}
+
+void monitor_show()
+{
+    std::unique_lock lk(monitor_mutex);
+    for (const auto &element : monitored)
+    {
+        printf("%s = %u (%s)\n", element.first.c_str(), element.second, inputRegToStr(element.second));
+    }
+}
 
 void set_monitor(const std::string &str)
 {
@@ -91,21 +151,34 @@ void print_monitor(void)
     std::unique_lock lk(monitor_mutex);
     if (g_monitor_enable)
     {
+        auto it1 = std::min_element(
+            monitored.begin(), monitored.end(),
+            [](auto &a, auto &b)
+            { return a.second < b.second; });
+
+        uint16_t min = it1->second;
+
+        auto it2 = std::max_element(
+            monitored.begin(), monitored.end(),
+            [](auto &a, auto &b)
+            { return a.second < b.second; });
+
+        uint16_t max = it2->second;
         // Find min-max of monitored registers
         {
-            uint16_t min = *std::min_element(monitor_registers.begin(), monitor_registers.end());
-            uint16_t max = *std::max_element(monitor_registers.begin(), monitor_registers.end());
+            // uint16_t min = *std::min_element(monitor_registers.begin(), monitor_registers.end());
+            // uint16_t max = *std::max_element(monitor_registers.begin(), monitor_registers.end());
             updateInputRegister(min, max);
         }
 
         std::string product;
-        for (size_t i = 0; i < monitor_names.size(); i++)
+        for (const auto &element : monitored)
         {
-            if (getInputRegScaleFactor(monitor_registers[i]) == 0)
-                product = product + monitor_names[i] + "=" + std::to_string((int16_t)inputRegisters[monitor_registers[i]]) + " ";
+            if (getInputRegScaleFactor(element.second) == 0)
+                product = product + element.first + "=" + std::to_string((int16_t)inputRegisters[element.second]) + " ";
             else
             {
-                product = product + monitor_names[i] + "=" + to_string_with_precision((float)((int16_t)inputRegisters[monitor_registers[i]]) / 10.0, 1) + " ";
+                product = product + element.first + "=" + to_string_with_precision((float)((int16_t)inputRegisters[element.second]) / 10.0, 1) + " ";
             }
         }
         printf("\r%s\n", product.c_str());
@@ -140,41 +213,30 @@ void special_function(int key)
 void init_monitor(void)
 {
     std::unique_lock lk(monitor_mutex);
-    monitor_names.clear();
-    monitor_registers.clear();
 
-    monitor_names.reserve(7);
-    monitor_registers.reserve(7);
-    // Default pattern of monitoring, can be changed by user
-    monitor_names.emplace_back("COMP");
-    monitor_registers.emplace_back(e_compressor);
-    // #if defined(midea) || defined(gree)
-    monitor_names.emplace_back("FAN");
-    monitor_registers.emplace_back(e_fan);
-    // #endif
-    monitor_names.emplace_back("LEVEL");
-    monitor_registers.emplace_back(e_powerLevel_100);
-
-    monitor_names.emplace_back("T3");
-    monitor_registers.emplace_back(e_condenser_temp);
-
-    monitor_names.emplace_back("T4");
-    monitor_registers.emplace_back(e_ambient_temp);
-
-    monitor_names.emplace_back("T5");
-    monitor_registers.emplace_back(e_discharge_temp);
+    monitored.clear();
+    monitored.emplace("COMP", e_compressor);
+    monitored.emplace("FAN", e_fan);
+    monitored.emplace("LEVEL", e_powerLevel_100);
+    monitored.emplace("T3", e_condenser_temp);
+    monitored.emplace("T4", e_ambient_temp);
+    monitored.emplace("T5", e_discharge_temp);
+    monitored.emplace("PWR", e_pwr);
 
     // #if defined(midea) || defined(haier)
-    monitor_names.emplace_back("EXV");
-    monitor_registers.emplace_back(eev_ro);
+    monitored.emplace("EXV", eev_ro);
     // #endif
     // #ifdef gree
-    monitor_names.emplace_back("EXV_A");
-    monitor_registers.emplace_back(eev_ro);
+    monitored.emplace("EXV_A", eev_ro);
+    monitored.emplace("EXV_B", eev1_ro);
 
-    monitor_names.emplace_back("EXV_B");
-    monitor_registers.emplace_back(eev1_ro);
-    // #endif
+    return;
+}
+
+void monitor_clear()
+{
+    printf("Removing all %zu entries from monitored registers.\n", monitored.size());
+    monitored.clear();
 }
 
 void new_terminal_init(void)
@@ -184,7 +246,7 @@ void new_terminal_init(void)
                                 updateInputRegister(0,e_input_last_item);
                                 show_settings(); });
     my_prompt.insertMenuItem("settings save", [](std::string)
-                             { writeRegister(e_save_button, Command::Save); });
+                             { writeRegister(e_execute_command, Command::Save); });
     my_prompt.insertMenuItem("settings write_config", [](std::string x)
                              { 
                                 updateHoldingRegister(0, e_holding_last_item);
@@ -193,12 +255,13 @@ void new_terminal_init(void)
                              { read_registers_from_file(x);
                                 writeMultipleRegisters(holdingRegisters, 0, e_holding_last_item); });
     my_prompt.insertMenuItem("settings restore_default", [](std::string)
-                             { restore_default_settings(); 
-                                    writeMultipleRegisters(holdingRegisters, 0, e_holding_last_item); });
+                             { 
+                                writeRegister(e_execute_command, Command::DefaultSettings);
+                                writeMultipleRegisters(holdingRegisters, 0, e_holding_last_item); });
     my_prompt.insertMenuItem("system bootsel", [](std::string)
-                             { writeRegister(e_save_button, 3); });
+                             { writeRegister(e_execute_command, 3); });
     my_prompt.insertMenuItem("system reset", [](std::string)
-                             { writeRegister(e_save_button, 2); });
+                             { writeRegister(e_execute_command, 2); });
     my_prompt.insertMenuItem("system show info", [](std::string)
                              { system_info(); });
     // my_prompt.insertMenuItem("system faults show_all", [](std::string)
@@ -263,42 +326,56 @@ void new_terminal_init(void)
     my_prompt.insertMenuItem("level decrement", [](std::string x)
                              { holdingRegisters[e_decrement] = static_cast<uint16_t>(std::stoul(x)); writeRegister(e_decrement, holdingRegisters[e_decrement]); });
 
-    my_prompt.insertMenuItem("temperature static set_target", [](std::string x)
-                             { holdingRegisters[e_temp_setpoint] = static_cast<uint16_t>(10 * std::stof(x)); writeRegister(e_temp_setpoint, holdingRegisters[e_temp_setpoint]); });
     my_prompt.insertMenuItem("temperature target show", [](std::string)
                              { printf("Temperature static setpoint: %2.1f'C\nTemperature actual setpoint: %2.1f'C\n", holdingRegisters[e_temp_setpoint] / 10.0, inputRegisters[e_temp_setpoint_ro] / 10.0); });
     my_prompt.insertMenuItem("temperature set_mode static", [](std::string)
                              { holdingRegisters[e_curve_active] = 0; writeRegister(e_curve_active, holdingRegisters[e_curve_active]); });
     my_prompt.insertMenuItem("temperature set_mode dynamic", [](std::string)
                              { holdingRegisters[e_curve_active] = 1; writeRegister(e_curve_active, holdingRegisters[e_curve_active]); });
-    my_prompt.insertMenuItem("temperature set_target", [](std::string x)
+    my_prompt.insertMenuItem("temperature target set", [](std::string x)
                              { holdingRegisters[e_temp_setpoint] = std::clamp(static_cast<int16_t>(10 * std::stof(x)), (int16_t)0, (int16_t)500); writeRegister(e_temp_setpoint, holdingRegisters[e_temp_setpoint]); });
     my_prompt.insertMenuItem("temperature show", [](std::string)
                              { updateHoldingRegister(0, e_holding_last_item); updateInputRegister(0,e_input_last_item); show_temperature(); });
-    my_prompt.insertMenuItem("temperature delta_low set", [](std::string x)
+    my_prompt.insertMenuItem("temperature delta_low", [](std::string x)
                              { holdingRegisters[e_low_delta] = static_cast<uint16_t>(10 * std::stof(x)); writeRegister(e_low_delta, holdingRegisters[e_low_delta]); });
-    my_prompt.insertMenuItem("temperature delta_high set", [](std::string x)
+    my_prompt.insertMenuItem("temperature delta_high", [](std::string x)
                              { holdingRegisters[e_high_delta] = static_cast<uint16_t>(10 * std::stof(x)); writeRegister(e_high_delta, holdingRegisters[e_high_delta]); });
-    my_prompt.insertMenuItem("temperature idle_time set", [](std::string x)
+    my_prompt.insertMenuItem("temperature idle_time", [](std::string x)
                              { holdingRegisters[e_on_off_interval] = static_cast<uint16_t>(std::stoul(x)); writeRegister(e_on_off_interval, holdingRegisters[e_on_off_interval]); });
+    my_prompt.insertMenuItem("temperature auto_off_delay", [](std::string x)
+                             { holdingRegisters[e_off_delay] = static_cast<uint16_t>(std::stoul(x)); writeRegister(e_off_delay, holdingRegisters[e_off_delay]); });
     my_prompt.insertMenuItem("temperature dynamic test", [](std::string x)
                              { test_equithermal_curve(static_cast<int>(std::stoi(x))); });
-    my_prompt.insertMenuItem("temperature dynamic set_gain", [](std::string x)
+    my_prompt.insertMenuItem("temperature dynamic gain", [](std::string x)
                              { holdingRegisters[e_curve_gain] = static_cast<uint16_t>(100 * std::stof(x)); writeRegister(e_curve_gain, holdingRegisters[e_curve_gain]); });
-    my_prompt.insertMenuItem("temperature dynamic set_offset", [](std::string x)
+    my_prompt.insertMenuItem("temperature dynamic offset", [](std::string x)
                              { holdingRegisters[e_curve_offset] = static_cast<uint16_t>(10 * std::stof(x)); writeRegister(e_curve_offset, holdingRegisters[e_curve_offset]); });
-    my_prompt.insertMenuItem("temperature pid k_p set", [](std::string x)
+    my_prompt.insertMenuItem("temperature dynamic calculate_AB", [](std::string x)
+                             { calculate_curve(x); });
+    my_prompt.insertMenuItem("temperature dynamic ambient_average_scope", [](std::string x)
+                             { holdingRegisters[e_ambient_temp_scope] = static_cast<uint16_t>(std::stoul(x)); writeRegister(e_ambient_temp_scope, holdingRegisters[e_ambient_temp_scope]); });;
+
+    my_prompt.insertMenuItem("temperature pid k_p", [](std::string x)
                              { holdingRegisters[e_Kp_factor] = static_cast<uint16_t>(10 * std::stof(x)); writeRegister(e_Kp_factor, holdingRegisters[e_Kp_factor]); });
-    my_prompt.insertMenuItem("temperature pid k_i set", [](std::string x)
+    my_prompt.insertMenuItem("temperature pid k_i", [](std::string x)
                              { holdingRegisters[e_Ki_factor] = static_cast<uint16_t>(100 * std::stof(x)); writeRegister(e_Ki_factor, holdingRegisters[e_Ki_factor]); });
-    my_prompt.insertMenuItem("temperature pid k_d set", [](std::string x)
+    my_prompt.insertMenuItem("temperature pid k_d", [](std::string x)
                              { holdingRegisters[e_Kd_factor] = static_cast<uint16_t>(10 * std::stof(x)); writeRegister(e_Kd_factor, holdingRegisters[e_Kd_factor]); });
-    my_prompt.insertMenuItem("temperature pid sampling_time set", [](std::string x)
+    my_prompt.insertMenuItem("temperature pid sampling_time", [](std::string x)
                              { holdingRegisters[e_pid_sampling_time] = static_cast<uint16_t>(std::stoul(x)); writeRegister(e_pid_sampling_time, holdingRegisters[e_pid_sampling_time]); });
-    my_prompt.insertMenuItem("temperature pid hysteresis set", [](std::string x)
+    my_prompt.insertMenuItem("temperature pid hysteresis", [](std::string x)
                              { holdingRegisters[e_pid_hysteresis] = static_cast<uint16_t>(10 * std::stof(x)); writeRegister(e_pid_hysteresis, holdingRegisters[e_pid_hysteresis]); });
     my_prompt.insertMenuItem("temperature pid show", [](std::string x)
                              { show_pid(); });
+
+    my_prompt.insertMenuItem("softstart preheat", [](std::string x)
+                             { holdingRegisters[e_preheat_temp] = static_cast<uint16_t>(10 * std::stof(x)); writeRegister(e_preheat_temp, holdingRegisters[e_preheat_temp]); });
+    my_prompt.insertMenuItem("softstart precool", [](std::string x)
+                             { holdingRegisters[e_precool_temp] = static_cast<uint16_t>(10 * std::stof(x)); writeRegister(e_precool_temp, holdingRegisters[e_precool_temp]); });
+    my_prompt.insertMenuItem("softstart hysteresis", [](std::string x)
+                             { holdingRegisters[e_pre_hysteresis] = static_cast<uint16_t>(10 * std::stof(x)); writeRegister(e_pre_hysteresis, holdingRegisters[e_pre_hysteresis]); });
+    my_prompt.insertMenuItem("softstart show", [](std::string x)
+                             { show_softstart(); });
 
     my_prompt.insertMenuItem("oil low_freq set", [](std::string x)
                              { holdingRegisters[e_oil_recovery_low_freq] = static_cast<uint16_t>(std::stoul(x)); writeRegister(e_oil_recovery_low_freq, holdingRegisters[e_oil_recovery_low_freq]); });
@@ -309,37 +386,84 @@ void new_terminal_init(void)
     my_prompt.insertMenuItem("oil show", [](std::string x)
                              { show_oil(); });
 
-    my_prompt.insertMenuItem("misc relay_function alarm set", [](std::string x)
+    my_prompt.insertMenuItem("misc relay alarm function", [](std::string x)
                              { holdingRegisters[e_alarm_relay_function] = static_cast<uint16_t>(std::stoul(x)); writeRegister(e_alarm_relay_function, holdingRegisters[e_alarm_relay_function]); });
-    my_prompt.insertMenuItem("misc relay_function defrost set", [](std::string x)
+    my_prompt.insertMenuItem("misc relay alarm polarity", [](std::string x)
+                             { updateHoldingRegister(0, e_holding_last_item);
+                                set_relay_polarity(0, x);
+                                writeRegister(e_relay_polarity, holdingRegisters[e_relay_polarity]); });
+    my_prompt.insertMenuItem("misc relay defrost function", [](std::string x)
                              { holdingRegisters[e_defrost_relay_function] = static_cast<uint16_t>(std::stoul(x)); writeRegister(e_defrost_relay_function, holdingRegisters[e_defrost_relay_function]); });
-    my_prompt.insertMenuItem("misc relay_function show", [](std::string x)
+    my_prompt.insertMenuItem("misc relay defrost polarity", [](std::string x)
+                             { updateHoldingRegister(0, e_holding_last_item);
+                                set_relay_polarity(1, x);
+                                writeRegister(e_relay_polarity, holdingRegisters[e_relay_polarity]); });
+    my_prompt.insertMenuItem("misc relay show", [](std::string x)
                              { show_relay_functions(); });
-    my_prompt.insertMenuItem("misc input_function heat set", [](std::string x)
+    my_prompt.insertMenuItem("misc input_function heat", [](std::string x)
                              { holdingRegisters[e_heat_input_function] = static_cast<uint16_t>(std::stoul(x)); writeRegister(e_heat_input_function, holdingRegisters[e_heat_input_function]); });
-    my_prompt.insertMenuItem("misc input_function cool set", [](std::string x)
+    my_prompt.insertMenuItem("misc input_function cool", [](std::string x)
                              { holdingRegisters[e_cool_input_function] = static_cast<uint16_t>(std::stoul(x)); writeRegister(e_cool_input_function, holdingRegisters[e_cool_input_function]); });
     my_prompt.insertMenuItem("misc input_function show", [](std::string x)
                              { show_input_functions(); });
-    my_prompt.insertMenuItem("misc monitor set", [](std::string x)
-                             { set_monitor(x); });
+    my_prompt.insertMenuItem("misc monitor add", [](std::string x)
+                             { monitor_add(x); });
+    my_prompt.insertMenuItem("misc monitor remove", [](std::string x)
+                             { monitor_remove(x); });
+    my_prompt.insertMenuItem("misc monitor clear", [](std::string x)
+                             { monitor_clear(); });
     my_prompt.insertMenuItem("misc monitor show", [](std::string x)
-                             { show_monitor(); });
-    my_prompt.insertMenuItem("misc monitor restore_default", [](std::string x)
+                             { monitor_show(); });
+    my_prompt.insertMenuItem("misc monitor default", [](std::string x)
                              { init_monitor(); });
 
-    my_prompt.insertMenuItem("hot_water show", [](std::string x)
-                             { holdingRegisters[e_hot_water_level] = static_cast<uint16_t>(std::stoul(x)); writeRegister(e_hot_water_level, holdingRegisters[e_hot_water_level]); });
-    my_prompt.insertMenuItem("hot_water level", [](std::string x)
-                             { holdingRegisters[e_hot_water_level] = static_cast<uint16_t>(std::stoul(x)); writeRegister(e_hot_water_level, holdingRegisters[e_hot_water_level]); });
-    my_prompt.insertMenuItem("hot_water temperature", [](std::string x)
-                             { holdingRegisters[e_hotwater_target_temperature] = static_cast<uint16_t>(std::stoul(x)); writeRegister(e_hotwater_target_temperature, holdingRegisters[e_hotwater_target_temperature]); });
-    my_prompt.insertMenuItem("hot_water mode legacy", [](std::string x)
-                             { holdingRegisters[e_hotwater_mode] = CWU::Legacy; writeRegister(e_hotwater_mode, holdingRegisters[e_hotwater_mode]); });
-    my_prompt.insertMenuItem("hot_water mode const_level", [](std::string x)
-                             { holdingRegisters[e_hotwater_mode] = CWU::FixedLevel;writeRegister(e_hotwater_mode, holdingRegisters[e_hotwater_mode]); });
-    my_prompt.insertMenuItem("hot_water mode const_temp", [](std::string x)
-                             { holdingRegisters[e_hotwater_mode] = CWU::FixedTemp; writeRegister(e_hotwater_mode, holdingRegisters[e_hotwater_mode]); });
+    my_prompt.insertMenuItem("misc protections t2_low", [](std::string x)
+                             { holdingRegisters[e_t2_low_alarm_value] = static_cast<int16_t>(10 * std::stof(x)); writeRegister(e_t2_low_alarm_value, holdingRegisters[e_t2_low_alarm_value]); });
+    my_prompt.insertMenuItem("misc protections flow_low", [](std::string x)
+                             { holdingRegisters[e_minimal_flow] = static_cast<uint16_t>(std::stoul(x)); writeRegister(e_minimal_flow, holdingRegisters[e_minimal_flow]); });
+
+    my_prompt.insertMenuItem("defrost start", [](std::string x)
+                             { holdingRegisters[e_execute_command] = Command::StartDefrost; writeRegister(e_execute_command, holdingRegisters[e_execute_command]); });
+    my_prompt.insertMenuItem("defrost stop", [](std::string x)
+                             { holdingRegisters[e_execute_command] = Command::StopDefrost; writeRegister(e_execute_command, holdingRegisters[e_execute_command]); });
+    my_prompt.insertMenuItem("defrost show", [](std::string x)
+                             { show_defrost(); });
+    my_prompt.insertMenuItem("defrost temperature_target", [](std::string x)
+                             { holdingRegisters[e_defrost_end_t3_target] = static_cast<uint16_t>(10 * std::stof(x)); writeRegister(e_defrost_end_t3_target, holdingRegisters[e_defrost_end_t3_target]); });
+    my_prompt.insertMenuItem("defrost compressor_max_speed", [](std::string x)
+                             { holdingRegisters[e_defrost_max_frequency] = static_cast<uint16_t>(std::stoul(x)); writeRegister(e_defrost_max_frequency, holdingRegisters[e_defrost_max_frequency]); });
+    my_prompt.insertMenuItem("defrost duration_max", [](std::string x)
+                             { holdingRegisters[e_defrost_max_duration] = static_cast<uint16_t>(std::stoul(x)); writeRegister(e_defrost_max_duration, holdingRegisters[e_defrost_max_duration]); });
+    my_prompt.insertMenuItem("defrost max_odu_delta", [](std::string x)
+                             { holdingRegisters[e_defrost_max_odu_delta] = static_cast<uint16_t>(10 * std::stoul(x)); writeRegister(e_defrost_max_odu_delta, holdingRegisters[e_defrost_max_odu_delta]); });
+    my_prompt.insertMenuItem("defrost interval_min", [](std::string x)
+                             { holdingRegisters[e_defrost_min_interval] = static_cast<uint16_t>(std::stoul(x)); writeRegister(e_defrost_min_interval, holdingRegisters[e_defrost_min_interval]); });
+    my_prompt.insertMenuItem("defrost drop_max_t3", [](std::string x)
+                             { holdingRegisters[e_defrost_max_t3_drop] = static_cast<uint16_t>(10 * std::stoul(x)); writeRegister(e_defrost_max_t3_drop, holdingRegisters[e_defrost_max_t3_drop]); });
+
+    my_prompt.insertMenuItem("dhw show", [](std::string x)
+                             { holdingRegisters[e_dhw_level] = static_cast<uint16_t>(std::stoul(x)); writeRegister(e_dhw_level, holdingRegisters[e_dhw_level]); });
+    my_prompt.insertMenuItem("dhw level", [](std::string x)
+                             { holdingRegisters[e_dhw_level] = static_cast<uint16_t>(std::stoul(x)); writeRegister(e_dhw_level, holdingRegisters[e_dhw_level]); });
+    my_prompt.insertMenuItem("dhw temperature", [](std::string x)
+                             { holdingRegisters[e_dhw_target_temperature] = static_cast<uint16_t>(std::stoul(x)); writeRegister(e_dhw_target_temperature, holdingRegisters[e_dhw_target_temperature]); });
+    my_prompt.insertMenuItem("dhw mode legacy", [](std::string x)
+                             { holdingRegisters[e_dhw_mode] = DHW::Legacy; writeRegister(e_dhw_mode, holdingRegisters[e_dhw_mode]); });
+    my_prompt.insertMenuItem("dhw mode const_level", [](std::string x)
+                             { holdingRegisters[e_dhw_mode] = DHW::FixedLevel;writeRegister(e_dhw_mode, holdingRegisters[e_dhw_mode]); });
+    my_prompt.insertMenuItem("dhw mode const_temp", [](std::string x)
+                             { holdingRegisters[e_dhw_mode] = DHW::FixedTemp; writeRegister(e_dhw_mode, holdingRegisters[e_dhw_mode]); });
+
+    my_prompt.insertMenuItem("bivalent temperature_0", [](std::string x)
+                             { holdingRegisters[e_bivalent0_temp] = static_cast<uint16_t>(10 * std::stof(x)); writeRegister(e_bivalent0_temp, holdingRegisters[e_bivalent0_temp]); });
+    my_prompt.insertMenuItem("bivalent hystesis_0", [](std::string x)
+                             { holdingRegisters[e_bivalent0_hysteresis] = static_cast<uint16_t>(10 * std::stof(x)); writeRegister(e_bivalent0_hysteresis, holdingRegisters[e_bivalent0_hysteresis]); });
+    my_prompt.insertMenuItem("bivalent temperature_1", [](std::string x)
+                             { holdingRegisters[e_bivalent1_temp] = static_cast<uint16_t>(10 * std::stof(x)); writeRegister(e_bivalent1_temp, holdingRegisters[e_bivalent1_temp]); });
+    my_prompt.insertMenuItem("bivalent hystesis_1", [](std::string x)
+                             { holdingRegisters[e_bivalent1_hysteresis] = static_cast<uint16_t>(10 * std::stof(x)); writeRegister(e_bivalent1_hysteresis, holdingRegisters[e_bivalent1_hysteresis]); });
+    my_prompt.insertMenuItem("bivalent show", [](std::string x)
+                             { show_bivalent(); });
 
 #if defined(midea) || defined(gree) || defined(generic)
     my_prompt.insertMenuItem("developer odu compressor", [](std::string x)
@@ -479,7 +603,7 @@ int writeMultipleRegisters(uint16_t *registers, uint16_t addr, uint16_t count)
         return -1;
     }
 
-    int rc = modbus_write_registers(ctx, addr, count - 1, registers);
+    int rc = modbus_write_registers(ctx, addr, count, registers);
     if (rc == -1)
     {
         fprintf(stderr, "Write failed: %s\n", modbus_strerror(errno));
@@ -638,10 +762,6 @@ int main(int argc, char **argv)
     }
 
     modbus_set_slave(ctx, 53);
-
-    // Enable debugging mode to print raw data
-    //modbus_set_debug(ctx, TRUE);
-
     init_monitor();
 
     // Because Libmodbus API has changed after 3.1.2 version

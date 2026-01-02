@@ -3,18 +3,19 @@
 #include <cinttypes>
 #include <map>
 
+template <typename T>
 class LookupTable
 {
 private:
-    std::map<int32_t, int32_t> table;
+    std::map<T, T> table;
 
 public:
-    explicit LookupTable(std::map<int32_t, int32_t> input)
+    explicit LookupTable(std::map<T, T> input)
         : table(std::move(input))
     {
     }
 
-    int32_t get(int32_t key) const
+    T get(T key) const
     {
         if (table.empty())
             return 0; // Or throw, depending on your error handling strategy
@@ -46,16 +47,16 @@ public:
     }
 
 private:
-    static int32_t interpolate(int32_t x, int32_t x0, int32_t y0, int32_t x1, int32_t y1)
+    static T interpolate(T x, T x0, T y0, T x1, T y1)
     {
         float ratio = static_cast<float>(x - x0) / (x1 - x0);
-        return static_cast<int32_t>(y0 + ratio * (y1 - y0));
+        return static_cast<T>(y0 + ratio * (y1 - y0));
     }
 
-    static int32_t extrapolate(int32_t x, int32_t x0, int32_t y0, int32_t x1, int32_t y1)
+    static T extrapolate(T x, T x0, T y0, T x1, T y1)
     {
         float slope = static_cast<float>(y1 - y0) / (x1 - x0);
-        return static_cast<int32_t>(y1 + slope * (x - x1));
+        return static_cast<T>(y1 + slope * (x - x1));
     }
 };
 #endif

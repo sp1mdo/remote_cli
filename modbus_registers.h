@@ -42,10 +42,10 @@ enum input_reg
     e_compressor_max_frequency,
     e_water_flow_ltr_per_hour,
     e_temp_setpoint_ro,
-    e_curve_gain_ro,
+    e_superheat_ro,
     e_curve_offset_ro,
     e_ipm_temperature,      // update web
-    e_ssuction_temperature, // update web
+    e_suction_temperature, // update web
     e_water_in_ro,
     e_refrigerant_in,
     e_refrigerant_out,
@@ -64,6 +64,9 @@ enum input_reg
     e_interval_on_off_remaining,
     e_auto_off_remaining,
     e_till_defrost,
+    e_adc0,
+    e_adc1,
+    e_adc2,
     e_input_last_item,
 };
 
@@ -73,18 +76,18 @@ enum holding_reg
     e_mode,             // 0  - idle, 1 - cooling, 2 - heating
     e_level,            // from 0 to 100
     e_delta_offset,     // korekta obliczenia delty na potrzebe cop ( K x 10)
-    e_temp_setpoint,    // nastawa temperatury skalowanie x10 (od 170 do 300) w trybie klimatyzatorowym, poki co eksperymentalne
-    e_increment,        // wpisanie 1 powoduje jednorazowe zwiekszenie o 1 poziomu mocy (zakres 0-10). Mozna wpisac wiecej niz 1 wtedy zwiekszy wiecej
-    e_decrement,        // wpisanie 1 powoduje jednorazowe zmniejszeni o 1 poziomu mocy (zakres 0-10). Mozna wpisac wiecej niz 1 wtedy zmniejszy wiecej
-    e_odu_fan_override, // wymuszenie wartosci innej niz zadana/0-10v lecz w postaci zakodowanej w ramce danych
-    e_pipe_override,    // update webpage
+    e_temp_setpoint,    // nae_delta_offsetstawa temperatury skalowanie x10 (od 170 do 300) w trybie klimatyzatorowym, poki co eksperymentalne
+    e_increment,  //x      // wpisanie 1 powoduje jednorazowe zwiekszenie o 1 poziomu mocy (zakres 0-10). Mozna wpisac wiecej niz 1 wtedy zwiekszy wiecej
+    e_decrement,  //x      // wpisanie 1 powoduje jednorazowe zmniejszeni o 1 poziomu mocy (zakres 0-10). Mozna wpisac wiecej niz 1 wtedy zmniejszy wiecej
+    e_odu_fan_override,//x // wymuszenie wartosci innej niz zadana/0-10v lecz w postaci zakodowanej w ramce danych
+    e_pipe_override, //x   // update webpage
     e_pid_sampling_time,
     e_pid_hysteresis, // update webpage
     e_off_delay,
-    e_override_compressor,
+    e_override_compressor, //x
     e_Kp_factor,
     e_ambient_temp_scope, // x 100
-    e_hot_water_level,
+    e_dhw_level,
     e_curve_gain,   // 0-100
     e_curve_offset, // 0-100
     e_curve_active, // Czy temperatura nastawiona rzeczywista brana jest z e_temp_setpoint czy liczona z e_curve_gain i e_curve_offset
@@ -97,12 +100,12 @@ enum holding_reg
     e_flow_y2,
     e_flow_x3,
     e_flow_y3,
-    HOLDING_SPARE_4, // gree room
-    HOLDING_SPARE_5, // gree setpoint
-    HOLDING_SPARE_6, // gree idu fan
+    HOLDING_SPARE_4, // gree room //x
+    HOLDING_SPARE_5, // gree setpoint //x
+    HOLDING_SPARE_6, // gree idu fan //x
     e_Ki_factor,
     e_Kd_factor,
-    e_save_button,
+    e_execute_command, //x
     e_minimal_flow,
     e_t2_low_alarm_value,
     e_alarm_relay_function,   // update web
@@ -113,11 +116,25 @@ enum holding_reg
     e_oil_recovery_low_freq,
     e_oil_recovery_low_time,
     e_oil_recovery_restore_freq,
-    e_hotwater_mode,
-    e_hotwater_target_temperature,
+    e_dhw_mode,
+    e_dhw_target_temperature,
     e_defrost_max_frequency,
     e_defrost_end_t3_target,
     e_defrost_max_duration,
+    e_defrost_min_interval,
+    e_defrost_max_odu_delta,
+    e_defrost_max_t3_drop,
+    e_10v_scale,
+    e_preheat_temp,
+    e_precool_temp,
+    e_pre_hysteresis,
+    e_relay_polarity,
+    e_pwr_override,
+    e_bivalent0_temp,
+    e_bivalent0_hysteresis,
+    e_bivalent1_temp,
+    e_bivalent1_hysteresis,
+    e_bivalent0_level,
     e_holding_last_item,
 };
 
